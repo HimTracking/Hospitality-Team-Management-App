@@ -6,7 +6,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-echo Starting Hospitality Growth Desk at http://localhost:3031
+echo Starting Maati Living Team Desk at http://localhost:3031
 echo Keep this window open while the app is in use.
 node server.cjs
 pause

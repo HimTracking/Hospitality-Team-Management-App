@@ -1,6 +1,6 @@
-# Hospitality Growth Desk
+# Maati Living Community Team Desk
 
-A deployable hospitality agency workspace for team tasks, proof photos, shared business audits, OTA research, sales pipeline, marketing spend, and daily WhatsApp-ready reports.
+A deployable team workspace for Maati Living Community, Sitla · Mukteshwar: tasks, proof photos, property audits, OTA operations, sales pipeline, marketing spend, and daily WhatsApp-ready reports.
 
 ## Run locally
 

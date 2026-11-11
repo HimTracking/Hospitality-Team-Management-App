@@ -936,6 +936,6 @@ async function start() {
   PORT = Number(process.env.PORT || 3031);
   HOST = process.env.HOST || (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
   await loadDb();
-  http.createServer(serve).listen(PORT, HOST, () => console.log('Hospitality Growth Desk running at http://' + HOST + ':' + PORT));
+  http.createServer(serve).listen(PORT, HOST, () => console.log('Maati Living Team Desk running at http://' + HOST + ':' + PORT));
 }
 start().catch(error => { console.error(error); process.exit(1); });
