@@ -4,7 +4,7 @@ WORKDIR /app
 ENV HOST=0.0.0.0 PORT=3031 NODE_ENV=production
 
 COPY server.cjs package.json ./
-COPY public ./public
+COPY ["Hospitality Growth Desk/public", "./public"]
 RUN mkdir -p /app/data/uploads /app/data/audits /app/data/reports \
     && chown -R node:node /app/data
 
