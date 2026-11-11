@@ -1,4 +1,7 @@
 .env
+.env.*
+!.env.example
+~$*
 data/state.json
 data/state.json.tmp
 data/audits/*.json

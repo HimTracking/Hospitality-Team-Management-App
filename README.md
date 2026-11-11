@@ -34,7 +34,7 @@ Publishing a separate App Store or Google Play listing is optional. If you later
 - Sales pipeline for Travel Agents, Wedding, B2B, and Retreat leads with owner, source, stage, deal value, and follow-up date
 - Admin CRM with marketing spend, source attribution, lead pipeline, follow-ups, conversions, account sync, and CSV export
 - Daily individual and team reports with WhatsApp share buttons
-- Role-aware Scout assistant, script drafts, and SEO suggestions when an OpenAI key is configured
+- Role-aware Scout assistant with short, in-session chat history, plus script drafts and SEO suggestions when an OpenAI key is configured
 - Mobile navigation, phone-sized forms, reduced-motion support, and installable PWA files
 
 ## Optional service connections
@@ -44,9 +44,19 @@ Copy `.env.example` to `.env`, add only the keys you use, and restart the app. F
 - **Meta Ads:** set `META_ACCESS_TOKEN` and `META_AD_ACCOUNT_ID`. Use a token with Ads Insights read access. The CRM sync imports daily campaign spend, impressions, clicks, and Meta-reported lead actions.
 - **Google Ads:** set the OAuth client ID, secret, refresh token, customer ID, and developer token. The CRM sync imports daily campaign spend and Google-reported conversions. Set the login customer ID when accessing the account through a manager account.
 - **Other channels:** enter WhatsApp, OTA, website, referral, and offline spend manually. Log sales leads with their source and campaign to compare channels against pipeline outcomes.
-- **Scout AI:** set `OPENAI_API_KEY` to enable chat, social script drafts, and SEO suggestions. Role instructions tailor its suggestions; it is not fine-tuned on private team data and does not see app records.
+- **Scout AI:** set `OPENAI_API_KEY` to enable chat, social script drafts, and SEO suggestions. Scout uses role instructions and sends the user’s current message plus up to ten recent chat turns to OpenAI. It does not automatically include app records and is not fine-tuned on private team data. Scout chat requests set `store: false`; the API key stays on the server.
 
 Ad reporting is read-only, and syncing is started by an admin for a selected range of up to 90 days. Lead stages and outcomes come from the CRM. Accounts must use INR for combined spend totals. Reports open a prefilled WhatsApp message for an admin to review and send; automatic group delivery is not configured.
+
+## Deploy on Render
+
+The included `render.yaml` is a Render Blueprint for the Node web service. Render deploys from a Git repository, so put this folder in a private GitHub repository, then choose **New → Blueprint** in Render and select that repository. The Blueprint uses a Starter web service and a 1 GB persistent disk mounted at `/var/data`; the app stores its JSON records and uploads under that mount so deploys do not erase them. It also sets a health check at `/healthz` and binds the web server to Render’s public interface.
+
+During Blueprint setup, provide a strong one-time `SETUP_KEY`. After the first deploy, open the Render URL and enter that key on the first-time setup screen while creating the two admin accounts. Add `OPENAI_API_KEY` if Scout should be enabled. Keep API keys and the setup key in Render’s Environment settings; do not commit them to GitHub. Optional Meta and Google credentials can be added there later.
+
+Render’s Starter web service currently starts at about US$7/month; the 1 GB disk adds about US$0.25/month. Render Free web services do not support a persistent disk, so they are not suitable for this app’s built-in JSON storage. Prices can change. See [Render web services](https://render.com/docs/web-services), [persistent disks](https://render.com/docs/disks), and [pricing](https://render.com/pricing).
+
+The current app keeps data in one JSON store and runs as one service instance. Do not scale it to multiple instances. Back up `/var/data` regularly. Existing local records are not copied to a new Render disk automatically; export or migrate them separately before switching the team over.
 
 ## Deploy with Docker
 
@@ -59,7 +69,7 @@ docker run --name hospitality-growth-desk --env-file .env -e NODE_ENV=developmen
 
 For a cloud host, deploy the Dockerfile behind HTTPS, set `HOST=0.0.0.0` and `NODE_ENV=production`, provide secrets through the host's environment settings, and mount a persistent volume at `/app/data`. The production session cookie is marked Secure. Keep a backup of the mounted data volume.
 
-This build uses a single Node process and JSON-file storage. Use one app instance with persistent storage; multi-instance hosting requires a shared database and session store. A process restart signs users out. WhatsApp auto-send and automatic lead capture from ad platforms need separate provider setup.
+This build uses a single Node process and JSON-file storage. Use one app instance with persistent storage; multi-instance hosting requires a shared database and session store. A process restart signs users out. WhatsApp auto-send and automatic lead capture from ad platforms need separate provider setup. HR users and admins can manage a shared volunteer roster from the Volunteer Desk; its contact details are only included in the state response for those roles.
 
 ## Backup
 
