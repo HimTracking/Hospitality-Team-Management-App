@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Maati Living Community Team Desk",
+  "short_name": "Maati Living",
+  "description": "Maati Living team tasks, hospitality sales, property audits, and daily reporting.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f1e7",
+  "theme_color": "#292936",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "/icons/maati-living-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/maati-living-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
