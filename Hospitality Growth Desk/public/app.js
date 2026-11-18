@@ -21,6 +21,8 @@ let searchText = '';
 let taskFilter = 'open';
 let taskTitleFilter = '';
 let platformFilter = 'All';
+let selectedOtaPropertyId = '';
+let otaRolloutPlan = '';
 let auditSearch = '';
 let salesSegment = 'All';
 let reportDate = '';
@@ -52,6 +54,7 @@ const currentUser = () => state && state.user;
 const isAdmin = () => currentUser() && currentUser().role === 'admin';
 const initials = name => String(name || '?').trim().split(/\s+/).slice(0, 2).map(item => item[0] || '').join('').toUpperCase();
 const memberById = id => (state.team || []).find(member => member.id === id) || null;
+const propertyById = id => (state.properties || []).find(property => property.id === id) || null;
 const avatarTone = name => {
   let hash = 0;
   for (const char of String(name || '')) hash = (hash * 31 + char.charCodeAt(0)) | 0;
@@ -68,7 +71,7 @@ const shiftDate = (date, days) => { const value = new Date((date || state.today)
 const money = value => '₹' + Math.round(Number(value || 0)).toLocaleString('en-IN');
 const badge = (value, label) => '<span class="badge badge-' + esc(String(value || '').toLowerCase().replace(/[^a-z0-9-]/g, '-')) + '">' + esc(label || value) + '</span>';
 const titleForPage = {
-  overview:'Dashboard', team:'Team directory', tasks:'Daily tasks', audits:'Business audits',
+  overview:'Dashboard', team:'Team directory', tasks:'Daily tasks', audits:'Business audits', properties:'Properties',
   platforms:'OTA optimization', 'ota-team':'OTA lister board', 'video-team':'Video production board',
   sales:'Sales desk', crm:'CRM & marketing', scripts:'Social & scripts', reports:'Daily report',
   'meta-board':'Meta Ads board', 'google-board':'Google optimization', 'hr-board':'Volunteer desk', 'design-board':'Design board'
@@ -110,6 +113,8 @@ function authView(setup, message, setupKeyRequired) {
 
 async function refresh() {
   state = await api('/api/state');
+  const activeProperties = (state.properties || []).filter(property => property.active !== false);
+  if (!activeProperties.some(property => property.id === selectedOtaPropertyId)) selectedOtaPropertyId = activeProperties[0] ? activeProperties[0].id : '';
   if (!titleForPage[page]) page = 'overview';
   render();
 }
@@ -118,7 +123,7 @@ function adminNav() {
   return [
     {label:'Overview',items:[['overview','◫','Dashboard']]},
     {label:'Work management',items:[['tasks','☑','Daily tasks'],['team','♙','Team directory']]},
-    {label:'Growth & clients',items:[['crm','▤','CRM & marketing'],['audits','◈','Business audits'],['sales','⇄','Sales desk']]},
+    {label:'Growth & clients',items:[['crm','▤','CRM & marketing'],['audits','◈','Business audits'],['properties','⌂','Properties'],['sales','⇄','Sales desk']]},
     {label:'Delivery teams',items:[['platforms','◎','OTA directory'],['ota-team','◉','OTA lister'],['video-team','▣','Video production'],['meta-board','◌','Meta Ads'],['google-board','⌕','Google optimize'],['design-board','✳','Graphic design'],['hr-board','♡','Volunteer desk'],['scripts','✎','Social & scripts']]},
     {label:'Reporting',items:[['reports','▧','Daily report']]}
   ];
@@ -227,7 +232,8 @@ function taskCard(task) {
   const action = isAdmin()
     ? (task.status === 'done' ? proof + '<button class="btn btn-small" data-action="reopen-task" data-id="' + task.id + '">Reopen</button>' : '<button class="btn btn-small" data-action="edit-task" data-id="' + task.id + '">Edit</button>')
     : (task.status === 'done' ? proof : '<button class="btn btn-primary btn-small" data-action="complete-task" data-id="' + task.id + '">✓ Complete</button>');
-  return '<article class="card task-card"><div class="task-top"><div class="task-check ' + (task.status === 'done' ? 'done' : '') + '">' + (task.status === 'done' ? '✓' : '·') + '</div><div class="task-copy"><h3>' + esc(task.title) + '</h3><p>' + esc(task.description || 'No extra instructions added.') + '</p></div></div><div class="task-meta">' + status + badge('medium', task.type || task.memberTitle || 'Task') + (task.priority ? badge(task.priority.toLowerCase(), task.priority + ' priority') : '') + '</div><div class="task-footer"><small>' + (task.client ? '<b>' + esc(task.client) + '</b> · ' : '') + esc(taskDueText(task)) + (owner ? ' · ' + esc(owner.name) : '') + '</small><div class="list-actions">' + action + '</div></div>' + (task.status === 'done' && task.completionNote ? '<div class="field-help" style="margin-top:9px">Submitted note: ' + esc(task.completionNote) + '</div>' : '') + '</article>';
+  const property = propertyById(task.propertyId);
+  return '<article class="card task-card"><div class="task-top"><div class="task-check ' + (task.status === 'done' ? 'done' : '') + '">' + (task.status === 'done' ? '✓' : '·') + '</div><div class="task-copy"><h3>' + esc(task.title) + '</h3><p>' + esc(task.description || 'No extra instructions added.') + '</p></div></div><div class="task-meta">' + status + badge('medium', task.type || task.memberTitle || 'Task') + (property ? badge('active', property.name) : '') + (task.priority ? badge(task.priority.toLowerCase(), task.priority + ' priority') : '') + '</div><div class="task-footer"><small>' + (task.client ? '<b>' + esc(task.client) + '</b> · ' : '') + esc(taskDueText(task)) + (owner ? ' · ' + esc(owner.name) : '') + '</small><div class="list-actions">' + action + '</div></div>' + (task.status === 'done' && task.completionNote ? '<div class="field-help" style="margin-top:9px">Submitted note: ' + esc(task.completionNote) + '</div>' : '') + '</article>';
 }
 
 const VOLUNTEER_STAGES = ['Invited','Ready to onboard','Listed','Assigned','Inactive'];
@@ -328,6 +334,27 @@ function auditPage() {
     '<div class="grid grid-2"><section class="card"><div class="card-head"><div><div class="card-title">Saved audits</div><div class="card-sub">Stored as separate records in the app’s audit folder</div></div></div><div class="filter-bar" style="padding:0 14px 10px"><input class="input" id="audit-search" placeholder="Search property, city, or contact" value="' + esc(auditSearch) + '"></div><div class="list-pad">' + (rows || '<div class="empty"><strong>No business audits yet</strong>Create one to start the shared audit folder.</div>') + '</div></section><section class="card form-card"><div class="card-title">Audit checklist</div><div class="list-row"><span class="stat-icon">₹</span><div class="list-main"><strong>Revenue picture</strong><small>Current revenue, occupancy, seasonality, rate range</small></div></div><div class="list-row"><span class="stat-icon">⌂</span><div class="list-main"><strong>Property profile</strong><small>Room count, guest capacity, room types, location</small></div></div><div class="list-row"><span class="stat-icon">◎</span><div class="list-main"><strong>Distribution & marketing</strong><small>OTA listings, direct site, social, ads, budget, reviews</small></div></div><div class="list-row"><span class="stat-icon">↗</span><div class="list-main"><strong>Pitch opportunity</strong><small>Gaps, recommendations, next steps, audit status</small></div></div><div class="notice notice-warm" style="margin-top:13px">Both admin logins edit the same records. Each save also writes a JSON copy under <b>data/audits</b>.</div></section></div>';
 }
 
+function propertiesPage() {
+  const properties = state.properties || [];
+  const cards = properties.map(property => {
+    const links = Object.keys(property.otaLinks || {}).length;
+    const taskCount = state.tasks.filter(task => task.propertyId === property.id).length;
+    return '<article class="card property-card"><div class="property-card-top"><div><span class="eyebrow">' + (property.active === false ? 'Paused' : 'Active property') + '</span><h3>' + esc(property.name) + '</h3><p>' + esc(property.city || 'City not set') + '</p></div><span class="property-mark">⌂</span></div><div class="property-stats"><span><b>' + links + '</b> OTA routes</span><span><b>' + taskCount + '</b> linked tasks</span></div><div class="list-actions property-actions"><button class="btn btn-small" data-action="edit-property" data-id="' + property.id + '">Edit details</button><button class="btn btn-small btn-soft" data-action="manage-property-otas" data-id="' + property.id + '">Manage OTA routes →</button></div></article>';
+  }).join('');
+  return pageHead('Property directory', 'Create one record per property. Save its destination for each OTA so listers can choose a property and open the right listing or partner page.', '<button class="btn btn-primary" data-action="new-property">＋ Add property</button>') +
+    '<div class="notice notice-blue" style="margin-top:14px">OTA routes open in your browser. They use whichever account is already signed in there; the app does not store passwords or switch accounts.</div><div class="grid grid-3 property-grid">' + (cards || '<div class="card empty"><strong>No properties yet</strong>Add a property, then configure its OTA destinations.</div>') + '</div>';
+}
+
+function propertyModal(property) {
+  const edit = Boolean(property);
+  openModal('<div class="modal-head"><div><h2>' + (edit ? 'Edit property' : 'Add a property') + '</h2><p>Property names are shared by both admins and OTA listers.</p></div><button class="modal-close" data-action="close">×</button></div><form id="property-form"><input type="hidden" name="propertyId" value="' + (edit ? property.id : '') + '"><div class="fields"><div class="field"><label>Property name</label><input class="input" name="name" maxlength="140" value="' + esc(edit ? property.name : '') + '" required></div><div class="field"><label>City</label><input class="input" name="city" maxlength="120" value="' + esc(edit ? property.city : '') + '"></div>' + (edit ? '<div class="field wide"><label>Status</label><select class="select" name="active"><option value="true" ' + (property.active !== false ? 'selected' : '') + '>Active</option><option value="false" ' + (property.active === false ? 'selected' : '') + '>Paused</option></select><span class="field-help">Pausing hides the property from the OTA picker without deleting its saved routes.</span></div>' : '') + '</div><div class="modal-actions"><button class="btn" type="button" data-action="close">Cancel</button><button class="btn btn-primary" type="submit">' + (edit ? 'Save property' : 'Create property') + '</button></div></form>', true);
+}
+
+function otaRouteModal(property, platform) {
+  const route = property && property.otaLinks && property.otaLinks[platform.id] || {};
+  openModal('<div class="modal-head"><div><h2>' + (route.url ? 'Edit' : 'Add') + ' ' + esc(platform.name) + ' destination</h2><p>' + esc(property.name) + ' · Use a listing or partner portal URL that opens the correct account page.</p></div><button class="modal-close" data-action="close">×</button></div><form id="ota-route-form"><input type="hidden" name="propertyId" value="' + esc(property.id) + '"><input type="hidden" name="platformId" value="' + esc(platform.id) + '"><div class="fields"><div class="field wide"><label>HTTPS destination URL</label><input class="input" type="url" name="url" value="' + esc(route.url || '') + '" placeholder="https://..." autocomplete="url"><span class="field-help">Do not enter a password or add private sign-in details. Leave blank to remove this custom route.</span></div><div class="field wide"><label>Button label (optional)</label><input class="input" name="label" maxlength="80" value="' + esc(route.label || '') + '" placeholder="Open property listing"></div></div><div class="notice notice-warm" style="margin-top:12px">The link opens in the signed-in browser. If you use separate OTA accounts, sign into the matching account in that browser first.</div><div class="modal-actions"><button class="btn" type="button" data-action="close">Cancel</button><button class="btn btn-primary" type="submit">Save destination</button></div></form>', true);
+}
+
 function otaLogo(item) {
   const searchHosts = {
     '1hotelrez':'1hotelrez.com','adriacamps':'adriacamps.eu','alaric':'alarichotels.com','ascend-travel':'ascendtravel.com',
@@ -341,14 +368,19 @@ function otaLogo(item) {
 
 function otaPage() {
   const filters = ['All','India core','Global channels','Asia-Pacific','Europe','Americas','Metasearch','B2B distribution','Direct booking','Niche stays','Channel partner','Corporate travel','Travel agent'];
+  const properties = (state.properties || []).filter(property => property.active !== false);
+  const selectedProperty = propertyById(selectedOtaPropertyId);
   const list = otaPlatforms.filter(item => (platformFilter === 'All' || item.category === platformFilter) && (!searchText || (item.name + ' ' + item.category + ' ' + item.fit).toLowerCase().includes(searchText.toLowerCase())));
   const cards = list.map(item => {
-    const target = item.searchOnly ? 'https://www.google.com/search?q=' + encodeURIComponent(item.name + ' official hotel partner') : item.url;
-    const label = item.searchOnly ? 'Find site' : 'Open';
-    return '<article class="platform-card"><div class="platform-icon">' + otaLogo(item) + '</div><div class="platform-copy"><strong>' + esc(item.name) + '</strong><small>' + esc(item.category) + ' · ' + esc(item.fit) + '</small></div><div class="list-actions"><a class="btn btn-small" href="' + esc(target) + '" target="_blank" rel="noopener">' + label + '</a>' + (isAdmin() ? '<button class="btn btn-small btn-soft" data-action="assign-platform" data-id="' + item.id + '">Assign</button>' : '') + '</div></article>';
+    const route = selectedProperty && selectedProperty.otaLinks && selectedProperty.otaLinks[item.id];
+    const target = route && route.url ? route.url : (item.searchOnly ? 'https://www.google.com/search?q=' + encodeURIComponent(item.name + ' official hotel partner') : item.url);
+    const label = route && route.label ? route.label : (route ? 'Open property' : (item.searchOnly ? 'Find site' : 'Open'));
+    return '<article class="platform-card"><div class="platform-icon">' + otaLogo(item) + '</div><div class="platform-copy"><strong>' + esc(item.name) + '</strong><small>' + esc(item.category) + ' · ' + (route ? 'Property destination set' : esc(item.fit)) + '</small></div><div class="list-actions"><a class="btn btn-small" href="' + esc(target) + '" target="_blank" rel="noopener noreferrer">' + esc(label) + '</a>' + (isAdmin() && selectedProperty ? '<button class="btn btn-small btn-soft" data-action="set-ota-route" data-id="' + item.id + '" title="Set this property\'s destination">' + (route ? 'Edit route' : 'Set route') + '</button>' : '') + (isAdmin() ? '<button class="btn btn-small" data-action="assign-platform" data-id="' + item.id + '">Assign</button>' : '') + '</div></article>';
   }).join('');
-  return pageHead('OTA & booking channel directory', 'A 100-channel starter list with India-focused channels first, plus global, regional, metasearch, direct-booking, and B2B options. Confirm property fit and partner access before assigning.', '') +
-    '<div class="notice notice-blue" style="margin-top:14px">The first 20 are marked for India-first review. Direct partner portals open directly; channels without a verified public hotel portal use “Find site” to search the official partner information.</div><div class="filter-bar"><input class="input search-input" id="platform-search" value="' + esc(searchText) + '" placeholder="Search 100 channels"><select class="select select-small" id="platform-filter">' + filters.map(filter => '<option ' + (platformFilter === filter ? 'selected' : '') + '>' + esc(filter) + '</option>').join('') + '</select><span class="field-help">' + list.length + ' of ' + otaPlatforms.length + ' channels</span></div><div class="platform-grid">' + (cards || '<div class="card empty">No channels match this search.</div>') + '</div>';
+  const propertyPicker = properties.length ? '<label class="ota-property-picker"><span>Work on property</span><select class="select" id="ota-property-filter">' + properties.map(property => '<option value="' + esc(property.id) + '" ' + (property.id === selectedOtaPropertyId ? 'selected' : '') + '>' + esc(property.name) + (property.city ? ' · ' + esc(property.city) : '') + '</option>').join('') + '</select></label>' : '<div class="notice notice-warm">No active properties yet. Ask an admin to add them in Properties.</div>';
+  const rollout = (isAdmin() || currentUser().title === 'OTA Master') ? '<section class="card form-card ota-rollout"><div><div class="eyebrow">Scout · OTA rollout desk</div><h2>Make one change easier to apply everywhere</h2><p>Describe the update once. Scout prepares reusable master content, channel adaptation notes, and a manual check list for the OTAs you use.</p></div><div class="field"><label for="ota-change-input">Change to prepare</label><textarea class="textarea" id="ota-change-input" maxlength="2400" placeholder="Example: Update our check-in time to 3 PM and clarify that early check-in depends on availability. Include only facts you have verified."></textarea><span class="field-help">Only this text is sent to Scout. Property selection and saved OTA links are not included.</span></div><div class="toolbar"><button class="btn btn-primary" data-action="rollout-ota">✦ Prepare rollout with Scout</button><span class="field-help">Scout prepares guidance; a lister reviews and publishes each channel manually.</span></div><div id="ota-rollout-result">' + (otaRolloutPlan ? '<div class="field"><label>Master copy and rollout checklist</label><textarea class="textarea" id="ota-rollout-text" style="min-height:230px">' + esc(otaRolloutPlan) + '</textarea><button class="btn btn-soft" style="margin-top:8px" data-action="copy-ota-rollout">Copy rollout pack</button></div>' : '') + '</div></section>' : '';
+  return pageHead('OTA & booking channel directory', 'Choose a property first. Each OTA opens the saved destination for that property, with a directory fallback until an admin configures a route.', isAdmin() ? '<button class="btn" data-page="properties">Manage properties</button>' : '') +
+    '<div class="ota-controls">' + propertyPicker + '<div class="notice notice-blue">The saved destination opens in your browser and uses the account already signed in there. This app does not store OTA passwords or switch accounts.</div></div><div class="notice notice-blue" style="margin-top:14px">The first 20 are marked for India-first review. Channels without a verified public hotel portal use “Find site” until a property-specific route is saved.</div><div class="filter-bar"><input class="input search-input" id="platform-search" value="' + esc(searchText) + '" placeholder="Search 100 channels"><select class="select select-small" id="platform-filter">' + filters.map(filter => '<option ' + (platformFilter === filter ? 'selected' : '') + '>' + esc(filter) + '</option>').join('') + '</select><span class="field-help">' + list.length + ' of ' + otaPlatforms.length + ' channels</span></div><div class="platform-grid">' + (cards || '<div class="card empty">No channels match this search.</div>') + '</div>' + rollout;
 }
 
 function crmPage() {
@@ -468,6 +500,7 @@ function render() {
   else if (page === 'tasks') content = tasksPage(taskTitleFilter);
   else if (page === 'crm') content = isAdmin() ? crmPage() : memberOverview();
   else if (page === 'audits') content = isAdmin() ? auditPage() : memberOverview();
+  else if (page === 'properties') content = isAdmin() ? propertiesPage() : memberOverview();
   else if (page === 'platforms') content = otaPage();
   else if (page === 'ota-team') content = isAdmin() ? teamBoardPage('OTA lister board', 'OTA Master') : tasksPage('OTA Master');
   else if (page === 'video-team') content = isAdmin() ? teamBoardPage('Video production board', 'Videographer + Editor') : tasksPage('Videographer + Editor');
@@ -505,7 +538,8 @@ function taskModal(task, category, platform) {
   const types = TASK_TYPES[selectedTitle] || [];
   const type = task ? task.type : (platform ? 'Listing optimization' : '');
   const selectedPlatform = platform || (task && otaPlatforms.find(item => item.id === task.otaPlatformId));
-  openModal('<div class="modal-head"><div><h2>' + (edit ? 'Edit task assignment' : 'Assign a daily task') + '</h2><p>Assign one owner, a client, a task type, and a clear deadline.</p></div><button class="modal-close" data-action="close">×</button></div><form id="task-form"><input type="hidden" name="taskId" value="' + (edit ? task.id : '') + '"><input type="hidden" name="otaPlatformId" value="' + esc(selectedPlatform ? selectedPlatform.id : '') + '"><div class="fields"><div class="field wide"><label>Task title</label><input class="input" name="title" value="' + esc(edit ? task.title : (selectedPlatform ? selectedPlatform.name + ' listing optimization' : '')) + '" required placeholder="What needs to be completed?"></div><div class="field"><label>Team member</label><select class="select" id="task-member" name="memberId" required><option value="">Choose owner</option>' + memberOptions + '</select></div><div class="field"><label>Task type</label><input class="input" name="type" list="task-types" value="' + esc(type) + '" placeholder="Choose or type a task type"><datalist id="task-types">' + types.map(item => '<option value="' + esc(item) + '"></option>').join('') + '</datalist><div class="field-help">Categories can be expanded as you define each role’s workflow.</div></div><div class="field"><label>Client / property</label><input class="input" name="client" value="' + esc(edit ? task.client : '') + '" placeholder="Property or client name"></div><div class="field"><label>Deadline date</label><input class="input" type="date" name="dueDate" value="' + esc(edit ? task.dueDate : state.today) + '" required></div><div class="field"><label>Deadline time</label><input class="input" type="time" name="dueTime" value="' + esc(edit ? task.dueTime : '') + '"></div><div class="field"><label>Priority</label><select class="select" name="priority"><option value="">Normal</option><option ' + ((edit && task.priority === 'High') ? 'selected' : '') + '>High</option><option ' + ((edit && task.priority === 'Medium') ? 'selected' : '') + '>Medium</option><option ' + ((edit && task.priority === 'Low') ? 'selected' : '') + '>Low</option></select></div><div class="field"><label>Sales segment</label><select class="select" name="segment"><option value="">Not applicable</option>' + ['Travel Agents','Wedding','B2B','Retreat'].map(item => '<option ' + (edit && task.segment === item ? 'selected' : '') + '>' + item + '</option>').join('') + '</select></div><div class="field wide"><label>Task details / brief</label><textarea class="textarea" name="description" placeholder="Clear outcome, reference, or client instructions">' + esc(edit ? task.description : '') + '</textarea></div></div><div class="modal-actions"><button class="btn" type="button" data-action="close">Cancel</button><button class="btn btn-primary" type="submit">' + (edit ? 'Save changes' : 'Assign task') + '</button></div></form>');
+  const propertyOptions = (state.properties || []).filter(item => item.active !== false).map(item => '<option value="' + esc(item.id) + '" ' + ((task && task.propertyId === item.id) || (!task && selectedPlatform && selectedOtaPropertyId === item.id) ? 'selected' : '') + '>' + esc(item.name) + (item.city ? ' · ' + esc(item.city) : '') + '</option>').join('');
+  openModal('<div class="modal-head"><div><h2>' + (edit ? 'Edit task assignment' : 'Assign a daily task') + '</h2><p>Assign one owner, a client, a task type, and a clear deadline.</p></div><button class="modal-close" data-action="close">×</button></div><form id="task-form"><input type="hidden" name="taskId" value="' + (edit ? task.id : '') + '"><input type="hidden" name="otaPlatformId" value="' + esc(selectedPlatform ? selectedPlatform.id : '') + '"><div class="fields"><div class="field wide"><label>Task title</label><input class="input" name="title" value="' + esc(edit ? task.title : (selectedPlatform ? selectedPlatform.name + ' listing optimization' : '')) + '" required placeholder="What needs to be completed?"></div><div class="field"><label>Team member</label><select class="select" id="task-member" name="memberId" required><option value="">Choose owner</option>' + memberOptions + '</select></div><div class="field"><label>Task type</label><input class="input" name="type" list="task-types" value="' + esc(type) + '" placeholder="Choose or type a task type"><datalist id="task-types">' + types.map(item => '<option value="' + esc(item) + '"></option>').join('') + '</datalist><div class="field-help">Categories can be expanded as you define each role’s workflow.</div></div><div class="field"><label>Client / property</label><input class="input" name="client" value="' + esc(edit ? task.client : '') + '" placeholder="Property or client name"></div><div class="field"><label>Link to property (optional)</label><select class="select" name="propertyId"><option value="">No linked property</option>' + propertyOptions + '</select></div><div class="field"><label>Deadline date</label><input class="input" type="date" name="dueDate" value="' + esc(edit ? task.dueDate : state.today) + '" required></div><div class="field"><label>Deadline time</label><input class="input" type="time" name="dueTime" value="' + esc(edit ? task.dueTime : '') + '"></div><div class="field"><label>Priority</label><select class="select" name="priority"><option value="">Normal</option><option ' + ((edit && task.priority === 'High') ? 'selected' : '') + '>High</option><option ' + ((edit && task.priority === 'Medium') ? 'selected' : '') + '>Medium</option><option ' + ((edit && task.priority === 'Low') ? 'selected' : '') + '>Low</option></select></div><div class="field"><label>Sales segment</label><select class="select" name="segment"><option value="">Not applicable</option>' + ['Travel Agents','Wedding','B2B','Retreat'].map(item => '<option ' + (edit && task.segment === item ? 'selected' : '') + '>' + item + '</option>').join('') + '</select></div><div class="field wide"><label>Task details / brief</label><textarea class="textarea" name="description" placeholder="Clear outcome, reference, or client instructions">' + esc(edit ? task.description : '') + '</textarea></div></div><div class="modal-actions"><button class="btn" type="button" data-action="close">Cancel</button><button class="btn btn-primary" type="submit">' + (edit ? 'Save changes' : 'Assign task') + '</button></div></form>');
 }
 
 function completionModal(task) {
@@ -632,6 +666,15 @@ document.addEventListener('click', async event => {
       return;
     }
     if (key === 'new-member') { memberModal(null); return; }
+    if (key === 'new-property') { propertyModal(null); return; }
+    if (key === 'edit-property') { propertyModal(state.properties.find(item => item.id === action.dataset.id)); return; }
+    if (key === 'manage-property-otas') { selectedOtaPropertyId = action.dataset.id; page = 'platforms'; render(); return; }
+    if (key === 'set-ota-route') {
+      const property = propertyById(selectedOtaPropertyId);
+      const platform = otaPlatforms.find(item => item.id === action.dataset.id);
+      if (property && platform) otaRouteModal(property, platform);
+      return;
+    }
     if (key === 'edit-member') { memberModal(state.team.find(member => member.id === action.dataset.id)); return; }
     if (key === 'new-volunteer') { volunteerModal(null); return; }
     if (key === 'edit-volunteer') { volunteerModal((state.volunteers || []).find(person => person.id === action.dataset.id)); return; }
@@ -671,6 +714,8 @@ document.addEventListener('click', async event => {
     }
     if (key === 'draft-script') { await draftScript(); return; }
     if (key === 'draft-seo') { await draftSeo(); return; }
+    if (key === 'rollout-ota') { await prepareOtaRollout(); return; }
+    if (key === 'copy-ota-rollout') { await copyText(document.getElementById('ota-rollout-text').value); return; }
     if (key === 'copy-seo') { await copyText(document.getElementById('seo-result-text').value); return; }
     if (key === 'save-draft-script') { scriptDraftPrompt = document.getElementById('ai-prompt').value; scriptModal({title:'AI draft · ' + (state.user.name || ''), client:'', channel:'Instagram Reel', goal:'', body:document.getElementById('ai-result-text').value}); return; }
   } catch (error) { showToast(error.message); }
@@ -700,6 +745,7 @@ document.addEventListener('input', event => {
 document.addEventListener('change', event => {
   if (event.target.id === 'task-filter') { taskFilter = event.target.value; render(); }
   if (event.target.id === 'platform-filter') { platformFilter = event.target.value; render(); }
+  if (event.target.id === 'ota-property-filter') { selectedOtaPropertyId = event.target.value; render(); }
   if (event.target.id === 'report-date') { reportDate = event.target.value; selectedReport = state.reports.find(report => report.date === reportDate) || null; render(); }
   if (event.target.id === 'profile-photo' || event.target.id === 'member-profile-photo') {
     const file = event.target.files && event.target.files[0];
@@ -772,9 +818,20 @@ document.addEventListener('submit', async event => {
       await api('/api/spend',{method:'POST',body:data});
       closeModal();await refresh();showToast('Marketing spend saved');return;
     }
+    if (form.id === 'property-form') {
+      const id = data.propertyId;
+      const body = {name:data.name, city:data.city};
+      if (form.elements.active) body.active = data.active === 'true';
+      await api(id ? '/api/properties/' + id : '/api/properties', {method:id ? 'PATCH' : 'POST', body});
+      closeModal(); await refresh(); showToast(id ? 'Property updated' : 'Property added'); return;
+    }
+    if (form.id === 'ota-route-form') {
+      await api('/api/properties/' + data.propertyId + '/channels/' + data.platformId, {method:'PATCH', body:{url:data.url, label:data.label}});
+      closeModal(); await refresh(); showToast(data.url ? 'Property OTA destination saved' : 'Property OTA destination removed'); return;
+    }
     if (form.id === 'task-form') {
       const id=data.taskId;
-      const body={title:data.title,memberId:data.memberId,type:data.type,client:data.client,dueDate:data.dueDate,dueTime:data.dueTime,priority:data.priority,segment:data.segment,description:data.description,otaPlatformId:data.otaPlatformId};
+      const body={title:data.title,memberId:data.memberId,type:data.type,client:data.client,dueDate:data.dueDate,dueTime:data.dueTime,priority:data.priority,segment:data.segment,description:data.description,otaPlatformId:data.otaPlatformId,propertyId:data.propertyId};
       await api(id?'/api/tasks/'+id:'/api/tasks',{method:id?'PATCH':'POST',body});
       closeModal(); await refresh(); showToast(id?'Task updated':'Task assigned'); return;
     }
@@ -843,6 +900,20 @@ async function draftSeo() {
   try {
     const data = await api('/api/seo/draft', {method:'POST', body:{prompt}});
     result.innerHTML = '<div class="field" style="margin-top:12px"><label>AI suggestions · validate before publishing</label><textarea class="textarea" id="seo-result-text" style="min-height:200px">' + esc(data.draft) + '</textarea><button class="btn btn-soft" style="margin-top:8px" data-action="copy-seo">Copy suggestions</button></div>';
+  } catch (error) {
+    result.innerHTML = '<div class="notice notice-warm" style="margin-top:12px">' + esc(error.message) + '</div>';
+  }
+}
+
+async function prepareOtaRollout() {
+  const change = document.getElementById('ota-change-input').value.trim();
+  if (!change) { showToast('Describe the update you want to prepare first'); return; }
+  const result = document.getElementById('ota-rollout-result');
+  result.innerHTML = '<div class="notice" style="margin-top:12px">Scout is preparing the reusable copy and channel checklist…</div>';
+  try {
+    const data = await api('/api/ota/rollout', {method:'POST', body:{change}});
+    otaRolloutPlan = data.plan;
+    result.innerHTML = '<div class="field" style="margin-top:12px"><label>Master copy and rollout checklist · review before publishing</label><textarea class="textarea" id="ota-rollout-text" style="min-height:230px">' + esc(data.plan) + '</textarea><button class="btn btn-soft" style="margin-top:8px" data-action="copy-ota-rollout">Copy rollout pack</button></div>';
   } catch (error) {
     result.innerHTML = '<div class="notice notice-warm" style="margin-top:12px">' + esc(error.message) + '</div>';
   }

@@ -16,7 +16,7 @@ const SESSION_MS = 12 * 60 * 60 * 1000;
 const MAX_BODY = 10 * 1024 * 1024;
 const sessions = new Map();
 const attempts = new Map();
-let db = { version: 1, users: [], tasks: [], audits: [], contacts: [], scripts: [], reports: [], spendRecords: [], volunteers: [] };
+let db = { version: 1, users: [], tasks: [], audits: [], contacts: [], scripts: [], reports: [], spendRecords: [], volunteers: [], properties: [] };
 let saveQueue = Promise.resolve();
 let setupInProgress = false;
 
@@ -29,7 +29,7 @@ const safeUser = (user, includeLoginId = true) => ({
 });
 const CRM_CHANNELS = ['Meta Ads', 'Google Ads', 'WhatsApp', 'Instagram Organic', 'Facebook Organic', 'Website', 'OTA', 'Referral', 'Travel Agent', 'Other'];
 const TEAM_ASSISTANT_CONTEXT = {
-  'OTA Master': 'You are the OTA operations coach. Help improve listing completeness, rate and availability parity, photo order, amenity accuracy, promotions, review replies, and channel handoffs. Return a platform checklist in task order. Flag current partner rules for verification; do not invent platform requirements or property facts.',
+  'OTA Master': 'You are the OTA operations coach. Help prepare reusable master content, listing completeness checks, rate and availability parity reviews, photo order, amenity accuracy, promotions, review replies, and channel handoffs. Give a checklist that can be applied manually on each channel. Never claim you can access or update OTA accounts, and flag partner-specific rules for verification.',
   'Videographer + Editor': 'You are the shoot and post-production coach. Turn assignments into a practical shot list, timing plan, audio and framing checks, edit sequence, review handoff, and delivery checklist. Keep advice usable on location and do not invent property features.',
   'Meta Ads': 'You are the paid social coach. Help with campaign structure, creative tests, audience hypotheses, pacing, lead quality, and reporting. Ask for actual account metrics before proposing numeric budget or performance changes. You cannot see the live ads account.',
   'Google Optimizer': 'You are the local search and Google Business Profile coach. Help with profile completeness, service-area details, review responses, landing pages, local SEO workflows, and keyword grouping. Never invent keyword volume, rank, or live profile status.',
@@ -86,7 +86,7 @@ async function loadDb() {
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
-  for (const key of ['users', 'tasks', 'audits', 'contacts', 'scripts', 'reports', 'spendRecords', 'volunteers']) if (!Array.isArray(db[key])) db[key] = [];
+  for (const key of ['users', 'tasks', 'audits', 'contacts', 'scripts', 'reports', 'spendRecords', 'volunteers', 'properties']) if (!Array.isArray(db[key])) db[key] = [];
 }
 
 function isVolunteerManager(user) { return user.role === 'admin' || user.title === 'HR'; }
@@ -100,6 +100,13 @@ function safeVolunteer(volunteer) {
     status: volunteer.status, inviteDate: volunteer.inviteDate || '', notes: volunteer.notes || '',
     assignedToId: volunteer.assignedToId || '', assignedToName: volunteer.assignedToName || '',
     createdAt: volunteer.createdAt, updatedAt: volunteer.updatedAt, updatedBy: volunteer.updatedBy || ''
+  };
+}
+
+function safeProperty(property, includeOtaLinks) {
+  return {
+    id: property.id, name: property.name, city: property.city || '', active: property.active !== false,
+    otaLinks: includeOtaLinks ? property.otaLinks || {} : {}
   };
 }
 
@@ -172,9 +179,10 @@ function clearSession(req, res) {
 
 function cleanTask(input, existing, user) {
   const item = Object.assign({}, existing || {});
-  for (const key of ['title', 'type', 'client', 'dueDate', 'dueTime', 'description', 'priority', 'otaPlatformId', 'segment', 'location']) {
+  for (const key of ['title', 'type', 'client', 'dueDate', 'dueTime', 'description', 'priority', 'otaPlatformId', 'propertyId', 'segment', 'location']) {
     if (input[key] !== undefined) item[key] = clean(input[key], key === 'description' ? 2000 : 180);
   }
+  if (item.propertyId && !db.properties.some(property => property.id === item.propertyId && property.active !== false)) throw new Error('Choose an active property for this task.');
   const memberId = input.memberId !== undefined ? clean(input.memberId, 80) : item.memberId;
   const member = db.users.find(u => u.id === memberId && u.role === 'member' && u.active !== false);
   if (!member) throw new Error('Choose an active team member for this task.');
@@ -426,6 +434,7 @@ async function api(req, res, url) {
       user: safeUser(user),
       admins: db.users.filter(item => item.role === 'admin').map(item => safeUser(item, admin)),
       team: db.users.filter(item => item.role === 'member' && (admin || item.active !== false)).map(item => safeUser(item, admin)),
+      properties: db.properties.filter(property => admin || property.active !== false).map(property => safeProperty(property, admin || user.title === 'OTA Master')),
       tasks: assignedTasks.sort((a, b) => (a.dueDate + (a.dueTime || '23:59')).localeCompare(b.dueDate + (b.dueTime || '23:59'))),
       audits: admin ? db.audits.slice().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')) : [],
       contacts,
@@ -436,6 +445,60 @@ async function api(req, res, url) {
       adConnections: admin ? crmConnectionState() : null,
       today: localDate(), aiEnabled: Boolean(process.env.OPENAI_API_KEY)
     });
+  }
+
+  if (route === '/api/properties' && method === 'POST') {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const data = await readJson(req);
+    const name = clean(data.name, 140);
+    if (!name) return fail(res, 400, 'Enter a property name.');
+    if (db.properties.some(property => same(property.name, name))) return fail(res, 409, 'A property with that name already exists.');
+    const property = { id: crypto.randomUUID(), name, city: clean(data.city, 120), active: true, otaLinks: {}, createdAt: now(), updatedAt: now(), createdBy: admin.name };
+    db.properties.unshift(property);
+    await persist();
+    return send(res, 201, { property: safeProperty(property, true) });
+  }
+
+  const propertyRoute = route.match(/^\/api\/properties\/([\w-]+)$/);
+  if (propertyRoute && method === 'PATCH') {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const property = db.properties.find(item => item.id === propertyRoute[1]);
+    if (!property) return fail(res, 404, 'Property not found.');
+    const data = await readJson(req);
+    const name = data.name !== undefined ? clean(data.name, 140) : property.name;
+    if (!name) return fail(res, 400, 'Enter a property name.');
+    if (db.properties.some(item => item.id !== property.id && same(item.name, name))) return fail(res, 409, 'A property with that name already exists.');
+    if (data.active !== undefined && typeof data.active !== 'boolean') return fail(res, 400, 'Choose whether the property is active.');
+    property.name = name;
+    if (data.city !== undefined) property.city = clean(data.city, 120);
+    if (data.active !== undefined) property.active = data.active;
+    property.updatedAt = now();
+    property.updatedBy = admin.name;
+    await persist();
+    return send(res, 200, { property: safeProperty(property, true) });
+  }
+
+  const propertyChannelRoute = route.match(/^\/api\/properties\/([\w-]+)\/channels\/([a-z0-9-]+)$/);
+  if (propertyChannelRoute && method === 'PATCH') {
+    const admin = requireAdmin(req, res); if (!admin) return;
+    const property = db.properties.find(item => item.id === propertyChannelRoute[1]);
+    if (!property) return fail(res, 404, 'Property not found.');
+    const platforms = JSON.parse(await fs.readFile(path.join(PUBLIC_DIR, 'ota-platforms.json'), 'utf8'));
+    if (!platforms.some(platform => platform.id === propertyChannelRoute[2])) return fail(res, 404, 'OTA channel not found.');
+    const data = await readJson(req);
+    const target = clean(data.url, 1200);
+    if (target) {
+      let parsed;
+      try { parsed = new URL(target); } catch { return fail(res, 400, 'Enter a valid OTA account or listing URL.'); }
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !parsed.hostname || parsed.hostname === 'localhost') return fail(res, 400, 'Use the official HTTPS OTA account or listing URL.');
+      property.otaLinks = property.otaLinks || {};
+      property.otaLinks[propertyChannelRoute[2]] = { url: parsed.toString(), label: clean(data.label, 80), updatedAt: now(), updatedBy: admin.name };
+    } else if (property.otaLinks) {
+      delete property.otaLinks[propertyChannelRoute[2]];
+    }
+    property.updatedAt = now();
+    await persist();
+    return send(res, 200, { property: safeProperty(property, true) });
   }
 
   if (route === '/api/members' && method === 'POST') {
@@ -855,6 +918,29 @@ async function api(req, res, url) {
     const reply = (result.output || []).flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('\n');
     if (!reply) return fail(res, 502, 'Scout returned an empty reply. Please try again.');
     return send(res, 200, { reply });
+  }
+
+  if (route === '/api/ota/rollout' && method === 'POST') {
+    const user = requireAuth(req, res); if (!user) return;
+    if (user.role !== 'admin' && user.title !== 'OTA Master') return fail(res, 403, 'OTA rollout planning is for OTA listers and admins.');
+    if (!process.env.OPENAI_API_KEY) return fail(res, 503, 'Configure OPENAI_API_KEY on the app server to prepare OTA rollout plans.');
+    const data = await readJson(req);
+    const change = clean(data.change, 2400);
+    if (!change) return fail(res, 400, 'Describe the change you want to roll out.');
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.OPENAI_API_KEY },
+      body: JSON.stringify({
+        model: process.env.OPENAI_MODEL || 'gpt-4.1-mini', store: false,
+        instructions: 'You are Scout, an OTA operations specialist. From only the user’s message, prepare a practical rollout pack for a human OTA lister. Return: (1) a reusable master update, using placeholders for unknown property facts; (2) a channel-by-channel adaptation checklist the lister can apply to the OTAs they choose; (3) publishing order and a parity/QA checklist. Do not claim that you can log in, publish, sync, or apply changes to OTA accounts. Do not invent property facts, current OTA policies, or channel capabilities. Mark uncertain partner requirements for verification. Keep the result concise and usable. The app sends only the text the user typed for this request; you receive no property records, account links, team data, or selected-property context.',
+        input: change, max_output_tokens: 1000
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) return fail(res, 502, clean(result.error && result.error.message, 300) || 'Scout could not prepare the OTA rollout.');
+    const plan = (result.output || []).flatMap(item => item.content || []).filter(item => item.type === 'output_text').map(item => item.text).join('\n');
+    if (!plan) return fail(res, 502, 'Scout returned an empty rollout plan. Please try again.');
+    return send(res, 200, { plan });
   }
 
   if (route === '/api/reports' && method === 'GET') {

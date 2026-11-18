@@ -1,4 +1,4 @@
-const CACHE_NAME = 'maati-living-shell-v4';
+const CACHE_NAME = 'maati-living-shell-v5';
 const APP_SHELL = [
   '/',
   '/app.css',
